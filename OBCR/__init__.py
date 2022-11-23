@@ -1,1 +1,1 @@
-from obcr import *
+from .obcr import *
