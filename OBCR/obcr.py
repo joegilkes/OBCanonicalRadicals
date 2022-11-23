@@ -44,54 +44,126 @@ def get_radical_state(obatom):
     current_val = obatom.GetTotalValence()
     return typical_val - current_val
 
-    
-def get_hydrogenation(obatom, max_depth, curr_hydrog, curr_depth, prev_idx):
-    '''Recurses through a molecule, evaluating hydrogenation from a given starting atom.
-    
-    Starting from the atom defined by `obatom`, recurses through a molecule
-    via each atom's neighbours, up to a given depth. Evaluates overall
-    hydrogenation of the molecule around this atom.
 
-    Arguments:
-        obatom: OBAtom object to evaluate hydrogenation around.
-        max_depth: Maximum number of bonds to traverse out from.
-        curr_hydrog: Current hydrogenation (initialise from 0).
-        curr_depth: Current depth (initialise from 0).
-        prev_idx: Index of previous atom in recursive call (initialise from obatom.GetIdx()).
-    '''
-    # Check we aren't over-iterating.
-    curr_depth += 1
-    print(f'Current atom idx = {obatom.GetIdx()}')
-    print(f'Current depth = {curr_depth}')
-    if curr_depth >= max_depth:
-        print(f'Max depth reached, hydrogenation = {curr_hydrog}')
-        return curr_hydrog
+class HydrogenationResolver:
+    def __init__(self, obatom, max_depth):
+        '''Recurses through a molecule, evaluating hydrogenation from a given starting atom.
+    
+        Starting from the atom defined by `obatom`, recurses through a molecule
+        via each atom's neighbours, up to a given depth. Evaluates overall
+        hydrogenation of the molecule around this atom.
 
-    # Recurse into neighbours.
-    obneighbours = []
-    for neigh in ob.OBAtomAtomIter(obatom):
-        # Ignore previously visited neighbours.
-        if neigh.GetIdx() == prev_idx:
-            continue
-        # Increment on hydrogen neighbours.
-        elif neigh.GetType() == 'H':
-            print('Found hydrogen.')
-            curr_hydrog += 1
-        # Recurse for any continuations of the chain.
+        Arguments:
+            obatom: OBAtom object to evaluate hydrogenation around.
+            max_depth: Maximum number of bonds to traverse out from.
+        '''
+        self.obatom = obatom
+        self.max_depth = max_depth
+        self.curr_hydrog = 0
+        self.curr_depth = 0
+        self.prev_idx = self.obatom.GetIdx()
+
+    def __call__(self, obatom=None, prev_idx=None):
+        if obatom is None:
+            obatom = self.obatom
+        if prev_idx is None:
+            prev_idx = self.prev_idx
+
+        # Check we aren't over-iterating.
+        self.curr_depth += 1
+        print(f'Current atom idx = {obatom.GetIdx()}')
+        print(f'Current depth = {self.curr_depth}')
+        if self.curr_depth >= self.max_depth:
+            print(f'Max depth reached, hydrogenation = {self.curr_hydrog}')
+            return self
+
+        # Recurse into neighbours.
+        obneighbours = []
+        for neigh in ob.OBAtomAtomIter(obatom):
+            # Ignore previously visited neighbours.
+            if neigh.GetIdx() == prev_idx:
+                continue
+            # Increment on hydrogen neighbours.
+            elif neigh.GetType() == 'H':
+                print('Found hydrogen.')
+                self.curr_hydrog += 1
+            # Recurse for any continuations of the chain.
+            else:
+                print(f'Found non-hydrogen neighbour at index {neigh.GetIdx()}')
+                obneighbours.append(neigh)
+
+        if len(obneighbours) == 0:
+            print('Reached end of chain.')
+            return self
         else:
-            print(f'Found non-hydrogen neighbour at index {neigh.GetIdx()}')
-            obneighbours.append(neigh)
+            for neigh in obneighbours:
+                print(f'Recursing into neighbour at index {neigh.GetIdx()}')
+                # curr_hydrog = get_hydrogenation(neigh, max_depth, curr_hydrog, curr_depth, obatom.GetIdx())
+                self.__call__(neigh, obatom.GetIdx())
 
-    if len(obneighbours) == 0:
-        print('Reached end of chain.')
-        return curr_hydrog
-    else:
+        return self
+
+
+class RadicalResolver:
+    def __init__(self, obatom, start_direction=None):
+        '''Recurses through a molecule, resolving dangling radical bonds.
+    
+        Starting from the atom defined by `obatom`, recurses through a
+        molecule's bonds. If a bond is present between two atoms with
+        free radicals, increments the bond order of this bond by one,
+        implicitly removing these radicals.
+
+        The `bonds_changed` field can be queried after running the function
+        to determine if the radical structure has converged, or if another
+        pass over the molecule should be done to continue resolving bonds.
+
+        Arguments:
+            obatom: OBAtom object to start resolving radicals around.
+            start_direction (Default = None): Optional argument, denoting which neighbour to recurse down first.
+        '''
+        self.obatom = obatom
+        self.start_idx = obatom.GetIdx()
+        self.prev_idx = obatom.GetIdx()
+        self.bonds_changed = False
+        self.start_direction = start_direction
+
+    def __call__(self, obatom=None, prev_idx=None):
+        if obatom is None:
+            obatom = self.obatom
+        if prev_idx is None:
+            prev_idx = self.prev_idx
+
+        obneighidx = []
+        for neigh in ob.OBAtomAtomIter(obatom):
+            if neigh.GetType() == 'H':
+                continue
+            elif neigh.GetIdx() == prev_idx:
+                continue
+            elif neigh.GetIdx() == self.start_idx:
+                continue
+            else:
+                obneighidx.append(neigh.GetIdx())
+
+        if len(obneighidx) == 0:
+            print('Finished exploring chain.')
+            return self
+
+        if self.start_direction is not None:
+            obneighidx.pop(np.where(np.array(obneighidx) == self.start_direction)[0][0])
+            obneighidx.insert(0, self.start_direction)
+            self.start_direction = None
+        
+        obneighbours = [obatom.GetParent().GetAtom(idx) for idx in obneighidx]
+        
         for neigh in obneighbours:
-            print(f'Recursing into neighbour at index {neigh.GetIdx()}')
-            curr_hydrog = get_hydrogenation(neigh, max_depth, curr_hydrog, curr_depth, obatom.GetIdx())
+            if (get_radical_state(obatom) > 0) and (get_radical_state(neigh) > 0):
+                bond = obatom.GetBond(neigh)
+                bond.SetBondOrder(bond.GetBondOrder()+1)
+                self.bonds_changed = True
+            self.__call__(neigh, obatom.GetIdx())
 
-    return curr_hydrog
-
+        return self
+        
 
 def find_starting_radical(targets, obmol):
     '''Find the radical atom to start canonical radical resolution from.
@@ -121,7 +193,8 @@ def find_starting_radical(targets, obmol):
         hyd = [0 for _ in range(len(targets))]
         for i, targ_idx in enumerate(targets):
             print(f'### Exploring around atom with index {targ_idx} ###')
-            hyd[i] = get_hydrogenation(obmol.GetAtom(targ_idx), curr_depth, 0, 0, targ_idx)
+            hresolve = HydrogenationResolver(obmol.GetAtom(targ_idx), curr_depth)
+            hyd[i] = hresolve().curr_hydrog
         
         # If there is only one maximum, the start point has been found.
         if hyd.count(max(hyd)) == 1:
@@ -141,54 +214,7 @@ def find_starting_radical(targets, obmol):
                 print('Retrying at greater depth.\n')
 
 
-def resolve_radicals(obatom, prev_idx, start_idx, bonds_changed, start_direction=None):
-    '''Recurses through a molecule, resolving dangling radical bonds.
-    
-    Starting from the atom defined by `obatom`, recurses through a
-    molecule's bonds. If a bond is present between two atoms with
-    free radicals, increments the bond order of this bond by one,
-    implicitly removing these radicals.
 
-    Returns a boolean indicating if any bonds have been changed
-    by one full recursion over the molecule, such that the function
-    can be continuously called until no more bonds are being changed.
-
-    Arguments:
-        obatom: OBAtom object to start resolving radicals around.
-        prev_idx: Index of previous atom in recursive call (initialise from obatom.GetIdx()).
-        start_idx: Index of atom which the function was originally called from (initialise from obatom.GetIdx()).
-        bonds_changed: Boolean flag to keep track of bond change status through recursion (initialise as False).
-        start_direction (Default = None): Optional argument, denoting which neighbour to recurse down first.
-    '''
-    obneighidx = []
-    for neigh in ob.OBAtomAtomIter(obatom):
-        if neigh.GetType() == 'H':
-            continue
-        elif neigh.GetIdx() == prev_idx:
-            continue
-        elif neigh.GetIdx() == start_idx:
-            continue
-        else:
-            obneighidx.append(neigh.GetIdx())
-
-    if len(obneighidx) == 0:
-        print('Finished exploring chain.')
-        return bonds_changed
-
-    if start_direction is not None:
-        obneighidx.pop(np.where(np.array(obneighidx) == start_direction)[0][0])
-        obneighidx.insert(0, start_direction)
-    
-    obneighbours = [obatom.GetParent().GetAtom(idx) for idx in obneighidx]
-    
-    for neigh in obneighbours:
-        if (get_radical_state(obatom) > 0) and (get_radical_state(neigh) > 0):
-            bond = obatom.GetBond(neigh)
-            bond.SetBondOrder(bond.GetBondOrder()+1)
-            bonds_changed = True
-        bonds_changed = resolve_radicals(neigh, obatom.GetIdx(), start_idx, bonds_changed)
-
-    return bonds_changed
 
 
 def get_best_resolution(pbmols):
@@ -331,7 +357,8 @@ def fix_radicals(pbmol):
             start_atom = obmol.GetAtom(start_idx)
             bonds_changed = True
             while bonds_changed:
-                bonds_changed = resolve_radicals(start_atom, start_idx, start_idx, False, start_direction=obneighidx[i])
+                rresolve = RadicalResolver(start_atom, start_direction=obneighidx[i])
+                bonds_changed = rresolve().bonds_changed
 
         pbmol = get_best_resolution(pbmols)
 
@@ -339,6 +366,7 @@ def fix_radicals(pbmol):
         start_atom = obmol.GetAtom(start_idx)
         bonds_changed = True
         while bonds_changed:
-            bonds_changed = resolve_radicals(start_atom, start_idx, start_idx, False)
+            rresolve = RadicalResolver(start_atom)
+            bonds_changed = rresolve().bonds_changed
 
     return pbmol
