@@ -1,31 +1,41 @@
 from openbabel import pybel
 from openbabel import openbabel as ob
 import numpy as np
-import sys
 
 def get_molecules(path):
-    rgen = pybel.readfile('xyz', path)
-    rmol = []
+    '''Reads in molecule(s) from an xyz file.
+    
+    Assumes multiple molecules may be in the same xyz file, therefore
+    returns a list of pybel Molecule objects.
+    '''
+    gen = pybel.readfile('xyz', path)
+    mol = []
     gen_stat = True
     while gen_stat:
         try:
-            rm = next(rgen)
-            rmol.append(rm)
+            next_mol = next(gen)
+            mol.append(next_mol)
         except StopIteration:
             gen_stat = False
-    return rmol
+    return mol
+
 
 def pbmol_to_smi(pbmol):
+    '''Creates the Canonical SMILES representation of a given pybel Molecule.'''
     smi = pbmol.write('can').split()[0].strip()
     return smi
 
+
 def is_radical(smi):
+    '''Determines whether a given SMILES string contains radicals.'''
     if ('[' in smi):
         return True
     else:
         return False
 
+
 def get_radical_state(obatom):
+    '''Gets the radical state of a given OBAtom.'''
     typical_val = ob.GetTypicalValence(
         obatom.GetAtomicNum(), 
         obatom.GetTotalValence(),
@@ -34,8 +44,21 @@ def get_radical_state(obatom):
     current_val = obatom.GetTotalValence()
     return typical_val - current_val
 
-
+    
 def get_hydrogenation(obatom, max_depth, curr_hydrog, curr_depth, prev_idx):
+    '''Recurses through a molecule, evaluating hydrogenation from a given starting atom.
+    
+    Starting from the atom defined by `obatom`, recurses through a molecule
+    via each atom's neighbours, up to a given depth. Evaluates overall
+    hydrogenation of the molecule around this atom.
+
+    Arguments:
+        obatom: OBAtom object to evaluate hydrogenation around.
+        max_depth: Maximum number of bonds to traverse out from.
+        curr_hydrog: Current hydrogenation (initialise from 0).
+        curr_depth: Current depth (initialise from 0).
+        prev_idx: Index of previous atom in recursive call (initialise from obatom.GetIdx()).
+    '''
     # Check we aren't over-iterating.
     curr_depth += 1
     print(f'Current atom idx = {obatom.GetIdx()}')
@@ -71,6 +94,25 @@ def get_hydrogenation(obatom, max_depth, curr_hydrog, curr_depth, prev_idx):
 
 
 def find_starting_radical(targets, obmol):
+    '''Find the radical atom to start canonical radical resolution from.
+    
+    In order to properly canonicalise the radical resolution process,
+    resolution must start from the same atom each time. If multiple
+    atoms share the same maximum radical state of the molecule, the
+    canonical starting point is determined by which atom has the
+    greatest neighbouring hydrogenation.
+
+    This can be found be recursively exploring the neighbours of the
+    target atoms. In cases where neighbouring hydrogenation is equal,
+    the 'depth' of the search is increased, up to a maximum depth 
+    where it can be safely concluded that the proposed start points
+    have sufficiently similar environments that there is some symmetry,
+    and the position of the start point will not matter.
+
+    Arguments:
+        targets: List of OBAtom indeces for potential starting atoms.
+        obmol: OBMol object. 
+    '''
     start_found = False
     curr_depth = 1
     max_depth = 7
@@ -100,6 +142,24 @@ def find_starting_radical(targets, obmol):
 
 
 def resolve_radicals(obatom, prev_idx, start_idx, bonds_changed, start_direction=None):
+    '''Recurses through a molecule, resolving dangling radical bonds.
+    
+    Starting from the atom defined by `obatom`, recurses through a
+    molecule's bonds. If a bond is present between two atoms with
+    free radicals, increments the bond order of this bond by one,
+    implicitly removing these radicals.
+
+    Returns a boolean indicating if any bonds have been changed
+    by one full recursion over the molecule, such that the function
+    can be continuously called until no more bonds are being changed.
+
+    Arguments:
+        obatom: OBAtom object to start resolving radicals around.
+        prev_idx: Index of previous atom in recursive call (initialise from obatom.GetIdx()).
+        start_idx: Index of atom which the function was originally called from (initialise from obatom.GetIdx()).
+        bonds_changed: Boolean flag to keep track of bond change status through recursion (initialise as False).
+        start_direction (Default = None): Optional argument, denoting which neighbour to recurse down first.
+    '''
     obneighidx = []
     for neigh in ob.OBAtomAtomIter(obatom):
         if neigh.GetType() == 'H':
@@ -132,6 +192,16 @@ def resolve_radicals(obatom, prev_idx, start_idx, bonds_changed, start_direction
 
 
 def get_best_resolution(pbmols):
+    '''Determines the best radical resolution from a given list.
+    
+    Given multiple radical resolutions of the same molecule (e.g. from
+    different starting directions or atoms), throws out any invalid
+    structures and determines the best by whichever has the highest
+    overall bond order.
+
+    Arguments:
+        pbmols: List of Pybel Molecule objects.
+    '''
     obmols = [pbmol.OBMol for pbmol in pbmols]
 
     # Check for invalid structures, e.g. allenes within rings.
@@ -166,7 +236,6 @@ def get_best_resolution(pbmols):
                 print(f'Allene found within ring in structure {i+1}')
                 invalid_mols.append(i)
 
-
     # Remove invalid structures.
     for i in sorted(invalid_mols, reverse=True):
         pbmols.pop(i)
@@ -190,11 +259,36 @@ def get_best_resolution(pbmols):
             best_pbmol = pbmols[0]
 
         return best_pbmol
-        
-
 
 
 def fix_radicals(pbmol):
+    '''Canonicalise radical molecules within OpenBabel.
+    
+    OpenBabel sometimes struggles to parse structures with neighbouring
+    radicals consistently, leading to multiple interpretations of radical
+    structure coming from very similar geometries.
+
+    This tries to fix the issue by enforcing that all neighbouring radicals
+    should join together to form a bond, i.e. by transforming all radicals
+    into their most stable state.
+
+    Examples:
+        * The species [CH2][C]C and C[C]=C have equal likelihood of being
+        detected from the same geometry (via `pybel.readfile()`). These
+        species have the same atoms, but differ in their bonding with the
+        former having a radical CH2 and a diradical C, and the latter
+        having only a radical C. This function resolves the discrepancy
+        by forming a bond between the neighbouring radical carbons in the
+        former, transforming it into the latter and thus canonicalising
+        the radical structure.
+        * If the cyclic molecule CC1C[CH][CH][C]1 were read in, it could be
+        simplified to either CC1C[CH]C=[C]1 or CC1CC=C[C]1, depending on where
+        the simplification of the radicals starts from and which direction
+        around the ring it goes. This enforces a set of rules such that only
+        CC1C[CH]C=[C]1 will be output every time as the canonical radical
+        structure from that geometry.
+
+    '''
     obmol = pbmol.OBMol
 
     # Find radical states of all atoms.
@@ -203,6 +297,13 @@ def fix_radicals(pbmol):
         atom_idx = atom.GetIdx()
         atom_rad_state = get_radical_state(atom)
         radical_states[atom_idx] = atom_rad_state
+
+    # Check if radical resolution is worth doing.
+    # If there is only one (or less) radical atom, no new bonds will
+    # be formed so just return the original Molecule object.
+    rad_vals = list(radical_states.values())
+    if np.count_nonzero(rad_vals) <= 1:
+        return pbmol
 
     # Select starting point.
     max_radical_state = max(radical_states.values())
