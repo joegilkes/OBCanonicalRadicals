@@ -28,7 +28,8 @@ def pbmol_to_smi(pbmol):
 
 def is_radical(smi):
     '''Determines whether a given SMILES string contains radicals.'''
-    if ('[' in smi):
+    hydrogens = ['[H]', '[H][H]']
+    if smi not in hydrogens and ('[' in smi):
         return True
     else:
         return False
@@ -60,20 +61,21 @@ class HydrogenationResolver:
         self.obatom = obatom
         self.max_depth = max_depth
         self.curr_hydrog = 0
-        self.curr_depth = 0
         self.prev_idx = self.obatom.GetIdx()
 
-    def __call__(self, obatom=None, prev_idx=None):
+    def __call__(self, obatom=None, prev_idx=None, curr_depth=None):
         if obatom is None:
             obatom = self.obatom
         if prev_idx is None:
             prev_idx = self.prev_idx
+        if curr_depth is None:
+            curr_depth = 0
 
         # Check we aren't over-iterating.
-        self.curr_depth += 1
+        curr_depth += 1
         print(f'Current atom idx = {obatom.GetIdx()}')
-        print(f'Current depth = {self.curr_depth}')
-        if self.curr_depth >= self.max_depth:
+        print(f'Current depth = {curr_depth}')
+        if curr_depth >= self.max_depth:
             print(f'Max depth reached, hydrogenation = {self.curr_hydrog}')
             return self
 
@@ -98,8 +100,7 @@ class HydrogenationResolver:
         else:
             for neigh in obneighbours:
                 print(f'Recursing into neighbour at index {neigh.GetIdx()}')
-                # curr_hydrog = get_hydrogenation(neigh, max_depth, curr_hydrog, curr_depth, obatom.GetIdx())
-                self.__call__(neigh, obatom.GetIdx())
+                self.__call__(neigh, obatom.GetIdx(), curr_depth)
 
         return self
 
@@ -122,10 +123,26 @@ class RadicalResolver:
             start_direction (Default = None): Optional argument, denoting which neighbour to recurse down first.
         '''
         self.obatom = obatom
+        self.obmol = obatom.GetParent()
         self.start_idx = obatom.GetIdx()
         self.prev_idx = obatom.GetIdx()
         self.bonds_changed = False
         self.start_direction = start_direction
+
+        rings = self.obmol.GetSSSR()
+        self.n_rings = len(rings)
+        if self.n_rings == 0:
+            self.rings = None
+            self.ringpaths = None
+            self.ringsizes = None
+        else:
+            self.rings = rings
+            self.ringpaths = []
+            self.ringsizes = []
+            for i, ring in enumerate(rings):
+                self.ringpaths.append([idx for idx in ring._path])
+                self.ringsizes.append(len(self.ringpaths[i]))
+
 
     def __call__(self, obatom=None, prev_idx=None):
         if obatom is None:
@@ -153,16 +170,75 @@ class RadicalResolver:
             obneighidx.insert(0, self.start_direction)
             self.start_direction = None
         
-        obneighbours = [obatom.GetParent().GetAtom(idx) for idx in obneighidx]
+        obneighbours = [self.obmol.GetAtom(idx) for idx in obneighidx]
         
         for neigh in obneighbours:
             if (get_radical_state(obatom) > 0) and (get_radical_state(neigh) > 0):
-                bond = obatom.GetBond(neigh)
-                bond.SetBondOrder(bond.GetBondOrder()+1)
-                self.bonds_changed = True
+                # Check if atoms are in a ring.
+                # This implicitly cannot include atoms in multiple rings due to valence constraints.
+                ignore_bond = False
+                if self.n_rings > 0 and obatom.IsInRing() and neigh.IsInRing():
+                    ignore_bond = self._check_rings(obatom, neigh)
+
+                if not ignore_bond:        
+                    bond = obatom.GetBond(neigh)
+                    bond.SetBondOrder(bond.GetBondOrder()+1)
+                    self.bonds_changed = True
             self.__call__(neigh, obatom.GetIdx())
 
         return self
+
+
+    def _check_rings(self, obatom, neigh):
+        '''Checks neighbouring bonds in rings to determine if a bond update should be ignored.
+        
+        Returns True if the bond update should be ignored, otherwise
+        returns False.
+        '''
+        # Ensure no triple bonds can exist in rings.
+        bond = self.obmol.GetBond(obatom.GetIdx(), neigh.GetIdx())
+        if bond.GetBondOrder() >= 2:
+            return True
+
+        # Determine which ring the atoms are in (if applicable).
+        ringnum = None
+        if self.n_rings == 1:
+            ringnum = 0
+        else:
+            for i, path in enumerate(self.ringpaths):
+                if obatom.GetIdx() in path and neigh.GetIdx() in path:
+                    ringnum = i
+        if ringnum is None:
+            raise RuntimeError('Atoms could not be found in any ring.')
+
+        # Figure out if the ring path needs to be reversed based on the current direction of exploration.
+        ringpath = np.array(self.ringpaths[ringnum])
+        ringsize = self.ringsizes[ringnum]
+        obatom_ringpos = np.where(ringpath == obatom.GetIdx())[0][0]
+        neigh_ringpos = np.where(ringpath == neigh.GetIdx())[0][0]
+        if obatom_ringpos == 0 and neigh_ringpos == ringsize-1:
+            flipped = True
+        elif obatom_ringpos == ringsize-1 and neigh_ringpos == 0:
+            flipped = False
+        elif obatom_ringpos > neigh_ringpos:
+            flipped = True
+        else:
+            flipped = False
+        if flipped:
+            ringpath = np.flip(ringpath)
+            obatom_ringpos = np.where(ringpath == obatom.GetIdx())[0][0]
+            neigh_ringpos = np.where(ringpath == neigh.GetIdx())[0][0]
+
+        # Check bond orders of previous and next bonds in ring.
+        next_bond_atom_idx = ringpath.tolist()[(neigh_ringpos + 1) % ringsize]
+        prev_bond_atom_idx = ringpath.tolist()[(obatom_ringpos - 1) % ringsize]
+        next_bond = self.obmol.GetBond(neigh.GetIdx(), next_bond_atom_idx)
+        prev_bond = self.obmol.GetBond(obatom.GetIdx(), prev_bond_atom_idx)
+        # If either are > 1, do not apply a bond order change.
+        if (next_bond.GetBondOrder() > 1) or (prev_bond.GetBondOrder() > 1):
+            return True
+
+        return False
         
 
 def find_starting_radical(targets, obmol):
@@ -221,70 +297,37 @@ def get_best_resolution(pbmols):
     '''Determines the best radical resolution from a given list.
     
     Given multiple radical resolutions of the same molecule (e.g. from
-    different starting directions or atoms), throws out any invalid
-    structures and determines the best by whichever has the highest
-    overall bond order.
+    different starting directions or atoms), determines the best by 
+    whichever has the highest overall bond order. If there is a tie,
+    determines the best by whichever has the least free radical electrons.
 
     Arguments:
         pbmols: List of Pybel Molecule objects.
     '''
     obmols = [pbmol.OBMol for pbmol in pbmols]
 
-    # Check for invalid structures, e.g. allenes within rings.
-    invalid_mols = []
+    total_bond_orders = [0 for _ in range(len(obmols))]
+    n_radical_elecs = [0 for _ in range(len(obmols))]
     for i, obmol in enumerate(obmols):
-        rings = pbmols[i].sssr
-        n_rings = len(rings)
-        if n_rings == 0:
-            continue
-        else:
-            allene_in_ring = False
-            for ring in rings:
-                if allene_in_ring: continue
-                ringpath = ring._path
-                ringsize = len(ringpath)
-                ringpath = [idx for idx in ringpath]
-                ringpath.extend([ringpath[0], ringpath[1]])
+        for bond in ob.OBMolBondIter(obmol):
+            total_bond_orders[i] += bond.GetBondOrder()
+        for atom in ob.OBMolAtomIter(obmol):
+            n_radical_elecs[i] += get_radical_state(atom)
 
-                prev_double = False
-                for j in range(ringsize+1):
-                    bond = obmol.GetBond(ringpath[j], ringpath[j+1])
-                    if bond.GetBondOrder() > 1:
-                        if prev_double == True:
-                            allene_in_ring = True
-                            break
-                        else:
-                            prev_double = True
-                    else:
-                        prev_double = False
-
-            if allene_in_ring:
-                print(f'Allene found within ring in structure {i+1}')
-                invalid_mols.append(i)
-
-    # Remove invalid structures.
-    for i in sorted(invalid_mols, reverse=True):
-        pbmols.pop(i)
-        obmols.pop(i)
-
-    if len(obmols) == 0:
-        raise RuntimeError('No valid structure found for radical resolution of molecule.')
-    elif len(obmols) == 1:
-        return pbmols[0]
-    # If there is still a choice of valid configurations, choose
-    # the one with the greatest overall bond order.
+    if total_bond_orders.count(max(total_bond_orders)) == 1:
+        best_pbmol = pbmols[np.argmax(total_bond_orders)]
     else:
-        total_bond_orders = [0 for _ in range(len(obmols))]
-        for i, obmol in enumerate(obmols):
-            for bond in ob.OBMolBondIter(obmol):
-                total_bond_orders[i] += bond.GetBondOrder()
-
-        if total_bond_orders.count(max(total_bond_orders)) == 1:
-            best_pbmol = pbmols[np.argmax(total_bond_orders)]
+        # This is still doing the wrong thing.
+        # Instead of total free radicals, want to select the molecule
+        # with the fewest high radical character atoms.
+        best_molids = np.argwhere(total_bond_orders == np.amax(total_bond_orders)).flatten()
+        best_radical_elecs = [n_radical_elecs[i] for i in best_molids]
+        if best_radical_elecs.count(min(best_radical_elecs)) == 1:
+            best_pbmol = pbmols[best_molids[np.argin(best_radical_elecs)]]
         else:
             best_pbmol = pbmols[0]
 
-        return best_pbmol
+    return best_pbmol
 
 
 def fix_radicals(pbmol):
@@ -313,7 +356,6 @@ def fix_radicals(pbmol):
         around the ring it goes. This enforces a set of rules such that only
         CC1C[CH]C=[C]1 will be output every time as the canonical radical
         structure from that geometry.
-
     '''
     obmol = pbmol.OBMol
 
@@ -354,6 +396,7 @@ def fix_radicals(pbmol):
         pbmols = [pbmol.clone for _ in range(n_neighbours)]
         obmols = [mol.OBMol for mol in pbmols]
         for i, obmol in enumerate(obmols):
+            print(f'Going towards neighbour {obneighidx[i]}')
             start_atom = obmol.GetAtom(start_idx)
             bonds_changed = True
             while bonds_changed:

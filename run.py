@@ -20,6 +20,8 @@ def main():
             print(f'{atom.GetType()}    {atom.GetIdx()}    {get_radical_state(atom)}')
         print()
         mol = fix_radicals(mol)
+        # Force re-parsing of structure to ensure aromaticity is detected.
+        mol.addh()
         final_smi = pbmol_to_smi(mol)
     else:
         final_smi = initial_smi
