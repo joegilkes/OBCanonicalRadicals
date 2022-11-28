@@ -245,7 +245,10 @@ class RadicalResolver:
 
 
     def _check_conjugation(self, obatom, neigh):
-        '''
+        '''Checks neighbouring atoms/bonds to determine if forming a bond would break conjugation.
+        
+        Returns True if the bond update should be ignored, otherwise
+        returns False.
         '''
         obneighidx = []
         for next_neigh in ob.OBAtomAtomIter(neigh):
@@ -260,12 +263,15 @@ class RadicalResolver:
             return False
 
         for nnidx in obneighidx:
-            atom = obatom.GetParent().GetAtom(nnidx)
-            # Need to check for already formed DBs, as well as the potential to
-            # form DBs.
-            atom_rads = get_radical_state(atom)
-            if atom_rads >= 1:
+            # Don't form the bond if there is already conjugation in place.
+            if self.obmol.GetBond(neigh.GetIdx(), nnidx).GetBondOrder > 1:
                 return True
+            # Don't form the bond if skipping it would form a conjugated system.
+            else:
+                atom = self.obmol.GetAtom(nnidx)
+                atom_rads = get_radical_state(atom)
+                if atom_rads >= 1:
+                    return True
 
         return False
         
