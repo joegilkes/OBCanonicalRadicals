@@ -26,7 +26,7 @@ def main():
         if is_radical(smi):
             print(f'Species {i+1}')
             print('Type  idx  rads')
-            for atom in ob.OBMolAtomIter(mol.OBMol):
+            for atom in ob.OBMolAtomIter(spec):
                 print(f'{atom.GetType()}    {atom.GetIdx()}    {get_radical_state(atom)}')
             print()
             spec_mol = pybel.Molecule(spec)
