@@ -179,6 +179,9 @@ class RadicalResolver:
                 ignore_bond = False
                 if self.n_rings > 0 and obatom.IsInRing() and neigh.IsInRing():
                     ignore_bond = self._check_rings(obatom, neigh)
+                # Also check if this bond should be ignored in favour of conjugation.
+                elif self.obmol.GetBond(obatom, self.obmol.GetAtom(prev_idx)).GetBondOrder() == 2:
+                    ignore_bond = self._check_conjugation(obatom, neigh)
 
                 if not ignore_bond:        
                     bond = obatom.GetBond(neigh)
@@ -237,6 +240,32 @@ class RadicalResolver:
         # If either are > 1, do not apply a bond order change.
         if (next_bond.GetBondOrder() > 1) or (prev_bond.GetBondOrder() > 1):
             return True
+
+        return False
+
+
+    def _check_conjugation(self, obatom, neigh):
+        '''
+        '''
+        obneighidx = []
+        for next_neigh in ob.OBAtomAtomIter(neigh):
+            if next_neigh.GetType() == 'H':
+                continue
+            elif next_neigh.GetIdx() == obatom.GetIdx():
+                continue
+            else:
+                obneighidx.append(next_neigh.GetIdx())
+
+        if len(obneighidx) == 0:
+            return False
+
+        for nnidx in obneighidx:
+            atom = obatom.GetParent().GetAtom(nnidx)
+            # Need to check for already formed DBs, as well as the potential to
+            # form DBs.
+            atom_rads = get_radical_state(atom)
+            if atom_rads >= 1:
+                return True
 
         return False
         
