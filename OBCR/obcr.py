@@ -184,8 +184,10 @@ class RadicalResolver:
                 if self.n_rings > 0 and obatom.IsInRing() and neigh.IsInRing():
                     ignore_bond = self._check_rings(obatom, neigh)
                 # Also check if this bond should be ignored in favour of conjugation.
-                elif self.obmol.GetBond(obatom, self.obmol.GetAtom(prev_idx)).GetBondOrder() == 2:
-                    ignore_bond = self._check_conjugation(obatom, neigh)
+                elif obatom.GetIdx() != prev_idx:
+                    prev_bond = self.obmol.GetBond(obatom.GetIdx(), prev_idx)
+                    if prev_bond.GetBondOrder() > 1:
+                        ignore_bond = self._check_conjugation(obatom, neigh)
 
                 if not ignore_bond:        
                     bond = obatom.GetBond(neigh)
