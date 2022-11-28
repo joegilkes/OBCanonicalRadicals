@@ -345,25 +345,33 @@ def get_best_resolution(pbmols: List[pybel.Molecule]):
     obmols = [pbmol.OBMol for pbmol in pbmols]
 
     total_bond_orders = [0 for _ in range(len(obmols))]
-    n_radical_elecs = [0 for _ in range(len(obmols))]
+    radical_elecs = [{1: 0, 2: 0, 3: 0} for _ in range(len(obmols))]
     for i, obmol in enumerate(obmols):
         for bond in ob.OBMolBondIter(obmol):
             total_bond_orders[i] += bond.GetBondOrder()
         for atom in ob.OBMolAtomIter(obmol):
-            n_radical_elecs[i] += get_radical_state(atom)
+            rad_state = get_radical_state(atom)
+            if rad_state > 0:
+                radical_elecs[i][rad_state] += 1
 
     if total_bond_orders.count(max(total_bond_orders)) == 1:
         best_pbmol = pbmols[np.argmax(total_bond_orders)]
     else:
-        # This is still doing the wrong thing.
-        # Instead of total free radicals, want to select the molecule
-        # with the fewest high radical character atoms.
+        # Form subset of best molecules so far.
         best_molids = np.argwhere(total_bond_orders == np.amax(total_bond_orders)).flatten()
-        best_radical_elecs = [n_radical_elecs[i] for i in best_molids]
-        if best_radical_elecs.count(min(best_radical_elecs)) == 1:
-            best_pbmol = pbmols[best_molids[np.argin(best_radical_elecs)]]
+        best_radical_elecs = [radical_elecs[i] for i in best_molids]
+        # If one molecule has a lower maximum radical state than the others, choose this molecule.
+        state_3_counts = [rdict[3] for rdict in best_radical_elecs]
+        state_2_counts = [rdict[2] for rdict in best_radical_elecs]
+        state_1_counts = [rdict[1] for rdict in best_radical_elecs]
+        if state_3_counts.count(min(state_3_counts)) == 1:
+            best_pbmol = pbmols[best_molids[np.argmin(state_3_counts)]]
+        elif state_2_counts.count(min(state_2_counts)) == 1:
+            best_pbmol = pbmols[best_molids[np.argmin(state_2_counts)]]
+        elif state_1_counts.count(min(state_1_counts)) == 1:
+            best_pbmol = pbmols[best_molids[np.argmin(state_1_counts)]]
         else:
-            best_pbmol = pbmols[0]
+            best_pbmol = pbmols[best_molids[0]]
 
     return best_pbmol
 
