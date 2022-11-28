@@ -1,8 +1,10 @@
+from typing import List, Union
+
 from openbabel import pybel
 from openbabel import openbabel as ob
 import numpy as np
 
-def get_molecules(path):
+def get_molecules(path: str) -> List[pybel.Molecule]:
     '''Reads in molecule(s) from an xyz file.
     
     Assumes multiple molecules may be in the same xyz file, therefore
@@ -20,13 +22,13 @@ def get_molecules(path):
     return mol
 
 
-def pbmol_to_smi(pbmol):
+def pbmol_to_smi(pbmol: pybel.Molecule) -> str:
     '''Creates the Canonical SMILES representation of a given pybel Molecule.'''
     smi = pbmol.write('can').split()[0].strip()
     return smi
 
 
-def is_radical(smi):
+def is_radical(smi: str) -> bool:
     '''Determines whether a given SMILES string contains radicals.'''
     hydrogens = ['[H]', '[H][H]']
     if smi not in hydrogens and ('[' in smi):
@@ -35,7 +37,7 @@ def is_radical(smi):
         return False
 
 
-def get_radical_state(obatom):
+def get_radical_state(obatom: ob.OBAtom) -> int:
     '''Gets the radical state of a given OBAtom.'''
     typical_val = ob.GetTypicalValence(
         obatom.GetAtomicNum(), 
@@ -47,7 +49,7 @@ def get_radical_state(obatom):
 
 
 class HydrogenationResolver:
-    def __init__(self, obatom, max_depth):
+    def __init__(self, obatom: ob.OBAtom, max_depth: int):
         '''Recurses through a molecule, evaluating hydrogenation from a given starting atom.
     
         Starting from the atom defined by `obatom`, recurses through a molecule
@@ -63,7 +65,9 @@ class HydrogenationResolver:
         self.curr_hydrog = 0
         self.prev_idx = self.obatom.GetIdx()
 
-    def __call__(self, obatom=None, prev_idx=None, curr_depth=None):
+    def __call__(self, obatom: Union[ob.OBAtom, None]=None,
+                 prev_idx: Union[int, None]=None, 
+                 curr_depth: Union[int, None]=None):
         if obatom is None:
             obatom = self.obatom
         if prev_idx is None:
@@ -106,7 +110,7 @@ class HydrogenationResolver:
 
 
 class RadicalResolver:
-    def __init__(self, obatom, start_direction=None):
+    def __init__(self, obatom: ob.OBAtom, start_direction: Union[int, None]=None):
         '''Recurses through a molecule, resolving dangling radical bonds.
     
         Starting from the atom defined by `obatom`, recurses through a
@@ -144,7 +148,7 @@ class RadicalResolver:
                 self.ringsizes.append(len(self.ringpaths[i]))
 
 
-    def __call__(self, obatom=None, prev_idx=None):
+    def __call__(self, obatom: Union[ob.OBAtom, None]=None, prev_idx: Union[int, None]=None):
         if obatom is None:
             obatom = self.obatom
         if prev_idx is None:
@@ -192,7 +196,7 @@ class RadicalResolver:
         return self
 
 
-    def _check_rings(self, obatom, neigh):
+    def _check_rings(self, obatom: ob.OBAtom, neigh: ob.OBAtom):
         '''Checks neighbouring bonds in rings to determine if a bond update should be ignored.
         
         Returns True if the bond update should be ignored, otherwise
@@ -244,7 +248,7 @@ class RadicalResolver:
         return False
 
 
-    def _check_conjugation(self, obatom, neigh):
+    def _check_conjugation(self, obatom: ob.OBAtom, neigh: ob.OBAtom):
         '''Checks neighbouring atoms/bonds to determine if forming a bond would break conjugation.
         
         Returns True if the bond update should be ignored, otherwise
@@ -276,7 +280,7 @@ class RadicalResolver:
         return False
         
 
-def find_starting_radical(targets, obmol):
+def find_starting_radical(targets: List[int], obmol: ob.OBMol) -> int:
     '''Find the radical atom to start canonical radical resolution from.
     
     In order to properly canonicalise the radical resolution process,
@@ -325,10 +329,7 @@ def find_starting_radical(targets, obmol):
                 print('Retrying at greater depth.\n')
 
 
-
-
-
-def get_best_resolution(pbmols):
+def get_best_resolution(pbmols: List[pybel.Molecule]):
     '''Determines the best radical resolution from a given list.
     
     Given multiple radical resolutions of the same molecule (e.g. from
@@ -365,7 +366,7 @@ def get_best_resolution(pbmols):
     return best_pbmol
 
 
-def fix_radicals(pbmol):
+def fix_radicals(pbmol: pybel.Molecule):
     '''Canonicalise radical molecules within OpenBabel.
     
     OpenBabel sometimes struggles to parse structures with neighbouring
