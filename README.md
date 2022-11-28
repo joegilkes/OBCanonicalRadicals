@@ -1,0 +1,7 @@
+## NOTE: This package is still under active development. Expect things to change and become significantly more user friendly soon.
+
+# OBCanonicalRadicals
+
+OpenBabel takes a very conservative approach to identifying bonding structure from a 3D geometry (such as an XYZ file) when free radicals are present, often resulting in molecules with very high radical character that should spontaneously collapse to a more stable structure. Finding such a stable structure is simple - just increase the bond order every time two radical atoms are adjacent - but this approach can be inconsistent depending on factors such as the starting point for radical resolution, and the direction taken through the molecule. Without careful consideration of bonding patterns, resulting structures can also end up less stable than their highly radical counterparts.
+
+This package aims to remedy this issue by tidying up OpenBabel's bonding detection in the presence of radicals in a way that is both reproducible (returning a 'canonical' structure for every given radical species) and stable. This allows Openbabel-detected radical species to be utilised in applications like reaction networks, where obviously unstable radical species can be resolved to their more stable counterparts in a reproducible way in order to cut down the number of species in the network.
