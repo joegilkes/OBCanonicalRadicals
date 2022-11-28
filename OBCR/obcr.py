@@ -28,6 +28,12 @@ def pbmol_to_smi(pbmol: pybel.Molecule) -> str:
     return smi
 
 
+def obmol_to_smi(obmol: ob.OBMol) -> str:
+    '''Creates the Canonical SMILES representation of a given OpenBabel OBMol.'''
+    pbmol = pybel.Molecule(obmol)
+    return pbmol_to_smi(pbmol)
+
+
 def is_radical(smi: str) -> bool:
     '''Determines whether a given SMILES string contains radicals.'''
     hydrogens = ['[H]', '[H][H]']
