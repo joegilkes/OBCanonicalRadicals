@@ -13,9 +13,15 @@ This package aims to remedy this issue by tidying up OpenBabel's bonding detecti
 
 Note that this package WILL NOT work with OpenBabel 2!
 
+## Installation
+
+Due to OpenBabel 3 being quite difficult to compile, most people will have installed OpenBabel through a package distributor like `conda`. If this is the case, installing OBCanonicalRadicals through `pip` will not detect `conda`'s version of OpenBabel, and will then fail to install its own since a compiled version of OpenBabel will not be available on the system. Users should therefore install with `pip install --no-deps ./OBCanonicalRadicals` to utilise `conda`'s version of OpenBabel.
+
+In the event that users do have a locally compiled installation of OpenBabel, running `pip install ./OBCanonicalRadicals` should do the trick.
+
 ## Usage
 
-The package is implemeted around running a single function, `fix_radicals()`. Given a `pybel.Molecule` object, this function will detect the current radical/bonding state of the given molecule, and attempt to rectify the bonding structure by joining adjacent free radicals into bonds wherever it is sensible to do so.
+The package is implemeted around running a single function, `obcr.fix_radicals()`. Given a `pybel.Molecule` object, this function will detect the current radical/bonding state of the given molecule, and attempt to rectify the bonding structure by joining adjacent free radicals into bonds wherever it is sensible to do so.
 
 An example of running `fix_radicals()` can be seen in the `run.py` script, which can be used to do canonical conversion of radical SMILES strings or XYZ-based geometries on the command line. Of note is the usage of the `is_radical()` function, which is used to reduce unnecessary computation by only calling `fix_radicals()` on molecules where this may actually be needed.
 
