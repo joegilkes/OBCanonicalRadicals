@@ -2,8 +2,8 @@ import sys
 from openbabel import pybel
 from openbabel import openbabel as ob
 
-from OBCR.utils import get_molecules, pbmol_to_smi, obmol_to_smi, is_radical, get_radical_state
-from OBCR import fix_radicals
+from obcr.utils import get_molecules, pbmol_to_smi, obmol_to_smi, is_radical, get_radical_state
+from obcr import fix_radicals
 
 def main():
     molspec = sys.argv[1]

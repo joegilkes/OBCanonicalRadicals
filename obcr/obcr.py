@@ -4,7 +4,7 @@ from openbabel import pybel
 from openbabel import openbabel as ob
 import numpy as np
 
-from OBCR.utils import *
+from obcr.utils import *
 
 
 class HydrogenationResolver:
