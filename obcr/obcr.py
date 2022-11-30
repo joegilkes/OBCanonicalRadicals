@@ -1,4 +1,5 @@
 from typing import Union
+import logging as log
 
 from openbabel import pybel
 from openbabel import openbabel as ob
@@ -36,10 +37,10 @@ class HydrogenationResolver:
 
         # Check we aren't over-iterating.
         curr_depth += 1
-        print(f'Current atom idx = {obatom.GetIdx()}')
-        print(f'Current depth = {curr_depth}')
+        log.info(f'Current atom idx = {obatom.GetIdx()}')
+        log.info(f'Current depth = {curr_depth}')
         if curr_depth >= self.max_depth:
-            print(f'Max depth reached, hydrogenation = {self.curr_hydrog}')
+            log.info(f'Max depth reached, hydrogenation = {self.curr_hydrog}')
             return self
 
         # Recurse into neighbours.
@@ -50,19 +51,19 @@ class HydrogenationResolver:
                 continue
             # Increment on hydrogen neighbours.
             elif neigh.GetType() == 'H':
-                print('Found hydrogen.')
+                log.info('Found hydrogen.')
                 self.curr_hydrog += 1
             # Recurse for any continuations of the chain.
             else:
-                print(f'Found non-hydrogen neighbour at index {neigh.GetIdx()}')
+                log.info(f'Found non-hydrogen neighbour at index {neigh.GetIdx()}')
                 obneighbours.append(neigh)
 
         if len(obneighbours) == 0:
-            print('Reached end of chain.')
+            log.info('Reached end of chain.')
             return self
         else:
             for neigh in obneighbours:
-                print(f'Recursing into neighbour at index {neigh.GetIdx()}')
+                log.info(f'Recursing into neighbour at index {neigh.GetIdx()}')
                 self.__call__(neigh, obatom.GetIdx(), curr_depth)
 
         return self
@@ -125,7 +126,7 @@ class RadicalResolver:
                 obneighidx.append(neigh.GetIdx())
 
         if len(obneighidx) == 0:
-            print('Finished exploring chain.')
+            log.info('Finished exploring chain.')
             return self
 
         if self.start_direction is not None:
@@ -268,7 +269,7 @@ def find_starting_radical(targets: List[int], obmol: ob.OBMol) -> int:
         curr_depth += 2
         hyd = [0 for _ in range(len(targets))]
         for i, targ_idx in enumerate(targets):
-            print(f'### Exploring around atom with index {targ_idx} ###')
+            log.info(f'### Exploring around atom with index {targ_idx} ###')
             hresolve = HydrogenationResolver(obmol.GetAtom(targ_idx), curr_depth)
             hyd[i] = hresolve().curr_hydrog
         
@@ -276,18 +277,18 @@ def find_starting_radical(targets: List[int], obmol: ob.OBMol) -> int:
         if hyd.count(max(hyd)) == 1:
             start_found = True
             start_atom = targets[np.argmax(hyd)]
-            print(f'Start at atom with index {start_atom}\n')
+            log.info(f'Start at atom with index {start_atom}\n')
             return start_atom
         # If there are multiple maxima, check against max depth.
         else:
             if curr_depth == max_depth:
-                print('Max depth reached, starting from any of the targets should be valid.\n')
+                log.info('Max depth reached, starting from any of the targets should be valid.\n')
                 return targets[0]
             # Shortlist targets with joint max hydrogenation and iterate again.
             else:
                 targets = [targets[i] for i in np.argwhere(hyd == np.amax(hyd)).flatten()]
-                print(f'Multiple targets found: {targets}')
-                print('Retrying at greater depth.\n')
+                log.info(f'Multiple targets found: {targets}')
+                log.info('Retrying at greater depth.\n')
 
 
 def get_best_resolution(pbmols: List[pybel.Molecule]):
@@ -335,7 +336,7 @@ def get_best_resolution(pbmols: List[pybel.Molecule]):
     return best_pbmol
 
 
-def fix_radicals(pbmol: pybel.Molecule):
+def fix_radicals(pbmol: pybel.Molecule, verbose: bool=False):
     '''Canonicalise radical molecules within OpenBabel.
     
     OpenBabel sometimes struggles to parse structures with neighbouring
@@ -362,6 +363,9 @@ def fix_radicals(pbmol: pybel.Molecule):
         CC1C[CH]C=[C]1 will be output every time as the canonical radical
         structure from that geometry.
     '''
+    if verbose:
+        log.basicConfig(level=log.INFO, format='%(message)s')
+
     obmol = pbmol.OBMol
 
     # Find radical states of all atoms.
@@ -387,7 +391,7 @@ def fix_radicals(pbmol: pybel.Molecule):
     else:
         start_idx = highest_radical_atoms[0]
 
-    print(f'Starting radical resolution from atom with index {start_idx}')
+    log.info(f'Starting radical resolution from atom with index {start_idx}')
     obneighidx = []
     for neigh in ob.OBAtomAtomIter(obmol.GetAtom(start_idx)):
         if neigh.GetType() == 'H':
@@ -397,11 +401,11 @@ def fix_radicals(pbmol: pybel.Molecule):
     n_neighbours = len(obneighidx)
 
     if n_neighbours > 1:
-        print(f'Starting atom has {n_neighbours} neighbours, resolving best direction.')
+        log.info(f'Starting atom has {n_neighbours} neighbours, resolving best direction.')
         pbmols = [pbmol.clone for _ in range(n_neighbours)]
         obmols = [mol.OBMol for mol in pbmols]
         for i, obmol in enumerate(obmols):
-            print(f'Going towards neighbour {obneighidx[i]}')
+            log.info(f'Going towards neighbour {obneighidx[i]}')
             start_atom = obmol.GetAtom(start_idx)
             bonds_changed = True
             while bonds_changed:

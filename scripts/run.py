@@ -30,7 +30,7 @@ def main():
                 print(f'{atom.GetType()}    {atom.GetIdx()}    {get_radical_state(atom)}')
             print()
             spec_mol = pybel.Molecule(spec)
-            spec_mol = fix_radicals(spec_mol)
+            spec_mol = fix_radicals(spec_mol, verbose=True)
             # Force re-parsing of structure to ensure aromaticity is detected.
             spec_mol.addh()
             final_smi.append(pbmol_to_smi(spec_mol))
