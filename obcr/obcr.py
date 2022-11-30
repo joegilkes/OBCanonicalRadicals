@@ -24,6 +24,7 @@ class HydrogenationResolver:
         self.max_depth = max_depth
         self.curr_hydrog = 0
         self.prev_idx = self.obatom.GetIdx()
+        self.prev_idxs = [self.prev_idx]
 
     def __call__(self, obatom: Union[ob.OBAtom, None]=None,
                  prev_idx: Union[int, None]=None, 
@@ -32,6 +33,8 @@ class HydrogenationResolver:
             obatom = self.obatom
         if prev_idx is None:
             prev_idx = self.prev_idx
+        else:
+            self.prev_idxs.append(prev_idx)
         if curr_depth is None:
             curr_depth = 0
 
@@ -47,7 +50,7 @@ class HydrogenationResolver:
         obneighbours = []
         for neigh in ob.OBAtomAtomIter(obatom):
             # Ignore previously visited neighbours.
-            if neigh.GetIdx() == prev_idx:
+            if neigh.GetIdx() in self.prev_idxs:
                 continue
             # Increment on hydrogen neighbours.
             elif neigh.GetType() == 'H':
@@ -90,6 +93,7 @@ class RadicalResolver:
         self.obmol = obatom.GetParent()
         self.start_idx = obatom.GetIdx()
         self.prev_idx = obatom.GetIdx()
+        self.prev_idxs = [self.start_idx]
         self.bonds_changed = False
         self.start_direction = start_direction
 
@@ -113,14 +117,14 @@ class RadicalResolver:
             obatom = self.obatom
         if prev_idx is None:
             prev_idx = self.prev_idx
+        else:
+            self.prev_idxs.append(prev_idx)
 
         obneighidx = []
         for neigh in ob.OBAtomAtomIter(obatom):
             if neigh.GetType() == 'H':
                 continue
-            elif neigh.GetIdx() == prev_idx:
-                continue
-            elif neigh.GetIdx() == self.start_idx:
+            elif neigh.GetIdx() in self.prev_idxs:
                 continue
             else:
                 obneighidx.append(neigh.GetIdx())
