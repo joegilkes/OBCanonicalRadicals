@@ -234,7 +234,7 @@ class RadicalResolver:
 
         for nnidx in obneighidx:
             # Don't form the bond if there is already conjugation in place.
-            if self.obmol.GetBond(neigh.GetIdx(), nnidx).GetBondOrder > 1:
+            if self.obmol.GetBond(neigh.GetIdx(), nnidx).GetBondOrder() > 1:
                 return True
             # Don't form the bond if skipping it would form a conjugated system.
             else:
